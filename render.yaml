@@ -1,4 +1,4 @@
-# Render Blueprint — one service, built with uv instead of pip.
+# Render Blueprint - one service, built with uv instead of pip.
 # In Render: New > Blueprint > connect the repo containing this file > Apply.
 # Render detects uv automatically from the presence of uv.lock in the repo root.
 services:
@@ -10,6 +10,6 @@ services:
     startCommand: uv run gunicorn app:app
     envVars:
       - key: API_KEY
-        sync: false          # Render will prompt you to type this in during deploy
+        sync: false
       - key: STATEMENT_PASSWORD
-        
+        sync: false
