@@ -1,0 +1,7 @@
+# Never commit these — data/ has your real bank statement, .venv has local binaries
+.venv/
+__pycache__/
+*.pyc
+data/
+*.env
+.env
