@@ -1,18 +1,12 @@
 """
-main.py - decrypts a password-protected GTBank statement PDF and returns
+main.py - decrypts a password-protected Bank statement PDF and returns
 structured transaction rows.
 
-Import this from app.py:  from main import extract_transactions, transactions_to_csv
-
-No Tika, no Java, no separate hosted service. pikepdf handles the password,
-pdfplumber reads the real table columns (Trans. Date / Value Date /
-Reference / Debits / Credits / Balance / Originating Branch / Remarks) -
-tested against your actual June 2026 statement, 125 transactions extracted
-cleanly.
 """
 import csv
 import io
 import os
+from datetime import datetime
 import pikepdf
 import pdfplumber
 from dotenv import load_dotenv
@@ -30,12 +24,34 @@ def decrypt_pdf(pdf_path_or_bytes, password: str) -> bytes:
         return buf.getvalue()
 
 
+def _parse_amount(raw: str) -> float:
+    """Strips thousands-separator commas and converts a debit/credit/balance
+    cell to a float. Blank cells become 0.0."""
+    if not raw:
+        return 0.0
+    cleaned = raw.replace(",", "").strip()
+    if not cleaned:
+        return 0.0
+    return float(cleaned)
+
+
+def _parse_date(raw: str):
+    """Converts bank format 'DD-MMM-YYYY' text (e.g. '02-Oct-2024') into an ISO
+    'YYYY-MM-DD' string. Returns None if the cell isn't a real date, so the
+    caller can skip header/continuation rows."""
+    if not raw:
+        return None
+    try:
+        return datetime.strptime(raw.strip(), "%d-%b-%Y").strftime("%Y-%m-%d")
+    except ValueError:
+        return None
+
+
 def extract_transactions(pdf_path_or_bytes, password: str) -> list[dict]:
     """
     Decrypts the statement and returns one dict per transaction row:
-    date, reference, debit, credit, balance, remarks.
-    Blank debit/credit (the side that didn't apply to that row) is
-    normalized to "0.00" instead of an empty string.
+    date (ISO string), reference, debit (float), credit (float),
+    balance (float), remarks.
     """
     decrypted_bytes = decrypt_pdf(pdf_path_or_bytes, password)
     rows = []
@@ -50,14 +66,24 @@ def extract_transactions(pdf_path_or_bytes, password: str) -> list[dict]:
                     continue
                 trans_date, value_date, reference, debit, credit, balance, branch = cells[:7]
                 remarks = " ".join(cells[7:]).strip()
-                if not trans_date or trans_date.lower().startswith("trans"):
-                    continue
+
+                iso_date = _parse_date(trans_date)
+                if not iso_date:
+                    continue 
+
+                try:
+                    debit_val = _parse_amount(debit)
+                    credit_val = _parse_amount(credit)
+                    balance_val = _parse_amount(balance)
+                except ValueError:
+                    continue  # garbage row - skip rather than send bad data downstream
+
                 rows.append({
-                    "date": trans_date,
+                    "date": iso_date,
                     "reference": reference,
-                    "debit": debit.strip() or "0.00",
-                    "credit": credit.strip() or "0.00",
-                    "balance": balance,
+                    "debit": debit_val,
+                    "credit": credit_val,
+                    "balance": balance_val,
                     "remarks": remarks,
                 })
     return rows
@@ -77,7 +103,7 @@ if __name__ == "__main__":
     if not password:
         raise SystemExit("STATEMENT_PASSWORD not set - put it in .env or export it before running.")
 
-    test_file = "data/AC_ALOKAM CHINENYENWA AUGUSTA_JUNE, 2026_270R008369327_FullStmt.pdf"
+    test_file = "data/statement_june2026.pdf"
     txns = extract_transactions(test_file, password)
     print(f"Extracted {len(txns)} transactions")
 
